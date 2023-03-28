@@ -86,13 +86,14 @@ class DQN(OffPolicyAlgorithm):
         exploration_fraction: float = 0.1,
         exploration_initial_eps: float = 1.0,
         exploration_final_eps: float = 0.05,
-        max_grad_norm: float = 10,
+        max_grad_norm: Optional[float] = 10,
         tensorboard_log: Optional[str] = None,
         policy_kwargs: Optional[Dict[str, Any]] = None,
         verbose: int = 0,
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        loss_functon: str = 'mse_loss',
     ):
         super().__init__(
             policy,
@@ -131,6 +132,7 @@ class DQN(OffPolicyAlgorithm):
         # Linear schedule will be defined in `_setup_model()`
         self.exploration_schedule = None
         self.q_net, self.q_net_target = None, None
+        self.loss_functon = loss_functon
 
         if _init_setup_model:
             self._setup_model()
@@ -205,14 +207,18 @@ class DQN(OffPolicyAlgorithm):
             current_q_values = th.gather(current_q_values, dim=1, index=replay_data.actions.long())
 
             # Compute Huber loss (less sensitive to outliers)
-            loss = F.smooth_l1_loss(current_q_values, target_q_values)
+            if self.loss_functon == "smooth_l1_loss":
+                loss = F.smooth_l1_loss(current_q_values, target_q_values)
+            elif self.loss_functon == "mse_loss":
+                loss = F.mse_loss(current_q_values, target_q_values)
             losses.append(loss.item())
 
             # Optimize the policy
             self.policy.optimizer.zero_grad()
             loss.backward()
             # Clip gradient norm
-            th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            if self.max_grad_norm:
+                th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.policy.optimizer.step()
 
         # Increase update counter

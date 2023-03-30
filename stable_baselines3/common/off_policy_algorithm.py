@@ -303,8 +303,9 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
         callback.on_training_start(locals(), globals())
 
+        episodic_return_all, episodic_length_all = [], []
         while self.num_timesteps < total_timesteps:
-            rollout = self.collect_rollouts(
+            rollout, episodic_return_l, episodic_length_l = self.collect_rollouts(
                 self.env,
                 train_freq=self.train_freq,
                 action_noise=self.action_noise,
@@ -313,6 +314,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 replay_buffer=self.replay_buffer,
                 log_interval=log_interval,
             )
+            episodic_return_all.extend(episodic_return_l)
+            episodic_length_all.extend(episodic_length_l)
 
             if rollout.continue_training is False:
                 break
@@ -327,7 +330,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
         callback.on_training_end()
 
-        return self
+        return self, episodic_return_all, episodic_length_all
 
     def train(self, gradient_steps: int, batch_size: int) -> None:
         """
@@ -527,6 +530,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
         callback.on_rollout_start()
         continue_training = True
+        episodic_return_l, episodic_length_l = [], []
         while should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
             if self.use_sde and self.sde_sample_freq > 0 and num_collected_steps % self.sde_sample_freq == 0:
                 # Sample a new noise matrix
@@ -540,6 +544,12 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
             self.num_timesteps += env.num_envs
             num_collected_steps += 1
+
+            for info in infos:
+                if "episode" in info.keys():
+                    global_step = self.num_timesteps
+                    episodic_return_l.append((global_step, info["episode"]["r"]))
+                    episodic_length_l.append((global_step, info["episode"]["l"]))
 
             # Give access to local variables
             callback.update_locals(locals())
@@ -576,4 +586,4 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                         self._dump_logs()
         callback.on_rollout_end()
 
-        return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training)
+        return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training), episodic_return_l, episodic_length_l
